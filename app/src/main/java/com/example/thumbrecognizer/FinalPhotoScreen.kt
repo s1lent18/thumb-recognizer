@@ -6,12 +6,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -21,16 +22,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.unit.dp
 
 @Composable
 fun FinalPhotoScreen(
     bitmap: Bitmap,
-    uploadUrl: String = "http://192.168.100.9:8080/match"
+    baseUrl: String = "http://192.168.100.9:8080"
 ) {
+    var name by remember { mutableStateOf("") }
     var uploading by remember { mutableStateOf(false) }
-    var uploadResult by remember { mutableStateOf<String?>(null) }
+    var matching by remember { mutableStateOf(false) }
+    var resultMessage by remember { mutableStateOf<String?>(null) }
 
     Box(
         modifier = Modifier
@@ -47,28 +51,62 @@ fun FinalPhotoScreen(
                     .clip(CircleShape)
             )
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
+            // Name input for upload
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = { Text("Name for Upload") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(0.8f)
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Match button
+            Button(
+                onClick = {
+                    matching = true
+                    resultMessage = null
+                    uploadCroppedImageForMatching(bitmap, "$baseUrl/match") { success, response ->
+                        matching = false
+                        resultMessage = if (success) {
+                            "Match success: $response"
+                        } else {
+                            "Match failed: $response"
+                        }
+                    }
+                },
+                enabled = !uploading && !matching
+            ) {
+                Text(if (matching) "Matching..." else "Match")
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Upload button
             Button(
                 onClick = {
                     uploading = true
-                    uploadCroppedImageForMatching(bitmap, uploadUrl) { success, response ->
+                    resultMessage = null
+                    uploadCroppedImageWithName(bitmap, name, "$baseUrl/upload") { success, response ->
                         uploading = false
-                        uploadResult = if (success) {
-                            "Upload successful: $response"
+                        resultMessage = if (success) {
+                            "Upload success: $response"
                         } else {
                             "Upload failed: $response"
                         }
                     }
                 },
-                enabled = !uploading
+                enabled = name.isNotBlank() && !uploading && !matching
             ) {
                 Text(if (uploading) "Uploading..." else "Upload")
             }
 
-            if (uploadResult != null) {
+            if (resultMessage != null) {
                 Spacer(modifier = Modifier.height(16.dp))
-                Text(uploadResult ?: "")
+                Text(resultMessage ?: "", color = Color.DarkGray)
             }
         }
     }

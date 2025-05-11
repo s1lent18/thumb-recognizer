@@ -95,6 +95,51 @@ fun cropBitmapFromCircle(
     return output
 }
 
+fun uploadCroppedImageWithName(
+    bitmap: Bitmap,
+    name: String,
+    uploadUrl: String,
+    onResult: (Boolean, String?) -> Unit
+) {
+    val client = OkHttpClient()
+
+    // Convert Bitmap to JPEG ByteArray
+    val stream = ByteArrayOutputStream()
+    bitmap.compress(Bitmap.CompressFormat.JPEG, 90, stream)
+    val byteArray = stream.toByteArray()
+
+    // Build Multipart Body
+    val requestBody = MultipartBody.Builder()
+        .setType(MultipartBody.FORM)
+        .addFormDataPart("name", name)
+        .addFormDataPart(
+            name = "file",
+            filename = "cropped_image.jpg",
+            body = byteArray.toRequestBody("image/jpeg".toMediaTypeOrNull())
+        )
+        .build()
+
+    val request = Request.Builder()
+        .url(uploadUrl)
+        .post(requestBody)
+        .build()
+
+    client.newCall(request).enqueue(object : Callback {
+        override fun onFailure(call: Call, e: IOException) {
+            onResult(false, e.message)
+        }
+
+        override fun onResponse(call: Call, response: Response) {
+            if (response.isSuccessful) {
+                onResult(true, response.body?.string())
+            } else {
+                onResult(false, "HTTP ${response.code}")
+            }
+        }
+    })
+}
+
+
 fun uploadCroppedImageForMatching(
     bitmap: Bitmap,
     uploadUrl: String,

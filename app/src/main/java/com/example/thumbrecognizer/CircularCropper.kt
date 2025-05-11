@@ -40,6 +40,16 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
+import java.io.ByteArrayOutputStream
+import java.io.IOException
 import kotlin.math.min
 
 fun cropBitmapFromCircle(
@@ -83,6 +93,51 @@ fun cropBitmapFromCircle(
     canvas.drawBitmap(squareBitmap, 0f, 0f, paint)
 
     return output
+}
+
+fun uploadCroppedImageForMatching(
+    bitmap: Bitmap,
+    uploadUrl: String,
+    onResult: (Boolean, String?) -> Unit
+) {
+    val client = OkHttpClient()
+
+    // Convert Bitmap to JPEG byte array
+    val stream = ByteArrayOutputStream()
+    bitmap.compress(Bitmap.CompressFormat.JPEG, 90, stream)
+    val byteArray = stream.toByteArray()
+
+    // Create multipart request body with only the file field
+    val requestBody = MultipartBody.Builder()
+        .setType(MultipartBody.FORM)
+        .addFormDataPart(
+            name = "file",
+            filename = "image.jpg",
+            body = byteArray.toRequestBody("image/jpeg".toMediaTypeOrNull())
+        )
+        .build()
+
+    // Build the POST request
+    val request = Request.Builder()
+        .url(uploadUrl)
+        .post(requestBody)
+        .build()
+
+    // Execute asynchronously
+    client.newCall(request).enqueue(object : Callback {
+        override fun onFailure(call: Call, e: IOException) {
+            onResult(false, e.message)
+        }
+
+        override fun onResponse(call: Call, response: Response) {
+            val body = response.body?.string()
+            if (response.isSuccessful) {
+                onResult(true, body)
+            } else {
+                onResult(false, body ?: "HTTP ${response.code}")
+            }
+        }
+    })
 }
 
 @SuppressLint("UnusedBoxWithConstraintsScope")

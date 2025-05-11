@@ -1,5 +1,6 @@
 package com.example.thumbrecognizer
 
+import android.annotation.SuppressLint
 import android.graphics.Bitmap
 //import android.graphics.BlendMode
 import android.graphics.Paint
@@ -21,6 +22,9 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import android.graphics.*
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -32,44 +36,35 @@ import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
-
-fun cropToCircle(original: Bitmap): Bitmap {
-    val size = minOf(original.width, original.height)
-    val x = (original.width - size) / 2
-    val y = (original.height - size) / 2
-    val squareBitmap = Bitmap.createBitmap(original, x, y, size, size)
-
-    val output = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(output)
-    val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-
-    canvas.drawCircle(size / 2f, size / 2f, size / 2f, paint)
-    paint.xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
-    canvas.drawBitmap(squareBitmap, 0f, 0f, paint)
-
-    return output
-}
+import kotlin.math.min
 
 fun cropBitmapFromCircle(
     original: Bitmap,
-    canvasSize: IntSize,
+    displayedImageSize: IntSize,
+    imageOffset: Offset,
     circleCenter: Offset,
     radius: Float
 ): Bitmap {
-    val scaleX = original.width / canvasSize.width.toFloat()
-    val scaleY = original.height / canvasSize.height.toFloat()
+    // Adjust crop center relative to image area (excluding padding)
+    val relativeX = circleCenter.x - imageOffset.x
+    val relativeY = circleCenter.y - imageOffset.y
 
-    // Scale crop area back to bitmap coordinates
-    val scaledCenterX = circleCenter.x * scaleX
-    val scaledCenterY = circleCenter.y * scaleY
+    // Scale relative coordinates to bitmap
+    val scaleX = original.width.toFloat() / displayedImageSize.width
+    val scaleY = original.height.toFloat() / displayedImageSize.height
+
+    val scaledCenterX = relativeX * scaleX
+    val scaledCenterY = relativeY * scaleY
     val scaledRadiusX = radius * scaleX
     val scaledRadiusY = radius * scaleY
 
     val left = (scaledCenterX - scaledRadiusX).toInt().coerceAtLeast(0)
     val top = (scaledCenterY - scaledRadiusY).toInt().coerceAtLeast(0)
-    val diameter = (2 * minOf(scaledRadiusX, scaledRadiusY)).toInt()
+    val diameter = (2 * min(scaledRadiusX, scaledRadiusY)).toInt()
 
     val squareBitmap = Bitmap.createBitmap(
         original,
@@ -90,7 +85,7 @@ fun cropBitmapFromCircle(
     return output
 }
 
-
+@SuppressLint("UnusedBoxWithConstraintsScope")
 @Composable
 fun CircularCropper(
     bitmap: Bitmap,
@@ -99,13 +94,11 @@ fun CircularCropper(
     val imageWidth = bitmap.width
     val imageHeight = bitmap.height
 
-    var canvasSize by remember { mutableStateOf(IntSize.Zero) }
-    var circleCenter by remember {
-        mutableStateOf(Offset.Zero)
-    }
     val circleRadius = remember { mutableFloatStateOf(300f) }
+    var circleCenter by remember { mutableStateOf(Offset.Zero) }
+    var canvasSize by remember { mutableStateOf(IntSize.Zero) }
 
-    Box(
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
             .onGloballyPositioned {
@@ -115,15 +108,47 @@ fun CircularCropper(
                 }
             }
     ) {
-        // Display the image
-        Image(
-            bitmap = bitmap.asImageBitmap(),
-            contentDescription = null,
-            contentScale = ContentScale.Fit,
-            modifier = Modifier.fillMaxSize()
-        )
+        val containerWidth = constraints.maxWidth
+        val containerHeight = constraints.maxHeight
+        val containerAspectRatio = containerWidth.toFloat() / containerHeight
+        val bitmapAspectRatio = imageWidth.toFloat() / imageHeight
 
-        // Overlay with transparent circle
+        val displayedImageSize: IntSize
+        val imageOffset: Offset
+
+        if (bitmapAspectRatio > containerAspectRatio) {
+            // Image fills width
+            val width = containerWidth
+            val height = (width / bitmapAspectRatio).toInt()
+            displayedImageSize = IntSize(width, height)
+            imageOffset = Offset(0f, ((containerHeight - height) / 2f))
+        } else {
+            // Image fills height
+            val height = containerHeight
+            val width = (height * bitmapAspectRatio).toInt()
+            displayedImageSize = IntSize(width, height)
+            imageOffset = Offset(((containerWidth - width) / 2f), 0f)
+        }
+
+        Box(
+            modifier = Modifier
+                .size(
+                    width = with(LocalDensity.current) { displayedImageSize.width.toDp() },
+                    height = with(LocalDensity.current) { displayedImageSize.height.toDp() }
+                )
+                .offset {
+                    IntOffset(imageOffset.x.toInt(), imageOffset.y.toInt())
+                }
+        ) {
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = null,
+                contentScale = ContentScale.FillBounds,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+
+        // Transparent circle overlay with drag
         Canvas(
             modifier = Modifier
                 .fillMaxSize()
@@ -154,7 +179,8 @@ fun CircularCropper(
             onClick = {
                 val cropped = cropBitmapFromCircle(
                     original = bitmap,
-                    canvasSize = canvasSize,
+                    displayedImageSize = displayedImageSize,
+                    imageOffset = imageOffset,
                     circleCenter = circleCenter,
                     radius = circleRadius.floatValue
                 )

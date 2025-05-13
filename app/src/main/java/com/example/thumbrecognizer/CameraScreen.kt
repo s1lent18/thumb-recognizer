@@ -43,7 +43,7 @@ fun CameraScreen(
                 controller.bindToLifecycle(lifecycleOwner)
             }
         },
-        modifier = Modifier.fillMaxSize()
+        modifier = Modifier.fillMaxWidth().fillMaxHeight(fraction = 0.8f)
     )
 
     Box(

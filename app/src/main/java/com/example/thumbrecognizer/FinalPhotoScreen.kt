@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -25,16 +26,18 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.unit.dp
+import com.example.thumbrecognizer.models.MatchResponse
 
 @Composable
 fun FinalPhotoScreen(
     bitmap: Bitmap,
-    baseUrl: String = "http://192.168.100.9:8080"
+    baseUrl: String = "http://172.16.85.93:8080"
 ) {
     var name by remember { mutableStateOf("") }
     var uploading by remember { mutableStateOf(false) }
     var matching by remember { mutableStateOf(false) }
-    var resultMessage by remember { mutableStateOf<String?>(null) }
+    var matchResult by remember { mutableStateOf<MatchResponse?>(null) }
+    var uploadMessage by remember { mutableStateOf<String?>(null) }
 
     Box(
         modifier = Modifier
@@ -48,12 +51,11 @@ fun FinalPhotoScreen(
                 contentDescription = null,
                 modifier = Modifier
                     .size(300.dp)
-                    .clip(CircleShape)
+                    //.clip(CircleShape)
             )
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Name input for upload
             OutlinedTextField(
                 value = name,
                 onValueChange = { name = it },
@@ -64,35 +66,42 @@ fun FinalPhotoScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Match button
             Button(
                 onClick = {
                     matching = true
-                    resultMessage = null
+                    matchResult = null
+                    uploadMessage = null
                     uploadCroppedImageForMatching(bitmap, "$baseUrl/match") { success, response ->
                         matching = false
-                        resultMessage = if (success) {
-                            "Match success: $response"
+                        if (success && response != null) {
+                            matchResult = response
                         } else {
-                            "Match failed: $response"
+                            uploadMessage = "Matching failed"
                         }
                     }
                 },
                 enabled = !uploading && !matching
             ) {
-                Text(if (matching) "Matching..." else "Match")
+                if (matching) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Text("Match")
+                }
             }
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Upload button
             Button(
                 onClick = {
                     uploading = true
-                    resultMessage = null
+                    matchResult = null
+                    uploadMessage = null
                     uploadCroppedImageWithName(bitmap, name, "$baseUrl/upload") { success, response ->
                         uploading = false
-                        resultMessage = if (success) {
+                        uploadMessage = if (success) {
                             "Upload success: $response"
                         } else {
                             "Upload failed: $response"
@@ -104,9 +113,19 @@ fun FinalPhotoScreen(
                 Text(if (uploading) "Uploading..." else "Upload")
             }
 
-            if (resultMessage != null) {
-                Spacer(modifier = Modifier.height(16.dp))
-                Text(resultMessage ?: "", color = Color.DarkGray)
+            Spacer(modifier = Modifier.height(16.dp))
+
+            matchResult?.let { result ->
+                Text("Matches:")
+                Spacer(modifier = Modifier.height(8.dp))
+                result.matches.forEach {
+                    Text("• ${it.name} (similarity: ${"%.2f".format(it.similarity)})")
+                }
+            }
+
+            uploadMessage?.let {
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(it, color = Color.DarkGray)
             }
         }
     }

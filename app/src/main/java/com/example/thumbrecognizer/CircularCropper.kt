@@ -2,10 +2,6 @@ package com.example.thumbrecognizer
 
 import android.annotation.SuppressLint
 import android.graphics.Bitmap
-//import android.graphics.BlendMode
-import android.graphics.Paint
-import android.graphics.PorterDuff
-import android.graphics.PorterDuffXfermode
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
@@ -20,7 +16,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
-import android.graphics.*
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.offset
@@ -30,7 +25,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
@@ -40,6 +35,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import com.example.thumbrecognizer.models.MatchResponse
+import com.google.gson.Gson
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
@@ -50,49 +47,34 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import java.io.ByteArrayOutputStream
 import java.io.IOException
-import kotlin.math.min
-
+import java.util.concurrent.TimeUnit
 fun cropBitmapFromCircle(
     original: Bitmap,
     displayedImageSize: IntSize,
     imageOffset: Offset,
-    circleCenter: Offset,
-    radius: Float
+    squareTopLeft: Offset,
+    squareSize: Float
 ): Bitmap {
-    // Adjust crop center relative to image area (excluding padding)
-    val relativeX = circleCenter.x - imageOffset.x
-    val relativeY = circleCenter.y - imageOffset.y
+    val relativeX = squareTopLeft.x - imageOffset.x
+    val relativeY = squareTopLeft.y - imageOffset.y
 
-    // Scale relative coordinates to bitmap
     val scaleX = original.width.toFloat() / displayedImageSize.width
     val scaleY = original.height.toFloat() / displayedImageSize.height
 
-    val scaledCenterX = relativeX * scaleX
-    val scaledCenterY = relativeY * scaleY
-    val scaledRadiusX = radius * scaleX
-    val scaledRadiusY = radius * scaleY
+    val scaledLeft = (relativeX * scaleX).toInt().coerceAtLeast(0)
+    val scaledTop = (relativeY * scaleY).toInt().coerceAtLeast(0)
+    val scaledSizeX = (squareSize * scaleX).toInt()
+    val scaledSizeY = (squareSize * scaleY).toInt()
 
-    val left = (scaledCenterX - scaledRadiusX).toInt().coerceAtLeast(0)
-    val top = (scaledCenterY - scaledRadiusY).toInt().coerceAtLeast(0)
-    val diameter = (2 * min(scaledRadiusX, scaledRadiusY)).toInt()
-
-    val squareBitmap = Bitmap.createBitmap(
+    val cropped = Bitmap.createBitmap(
         original,
-        left,
-        top,
-        diameter.coerceAtMost(original.width - left),
-        diameter.coerceAtMost(original.height - top)
+        scaledLeft,
+        scaledTop,
+        scaledSizeX.coerceAtMost(original.width - scaledLeft),
+        scaledSizeY.coerceAtMost(original.height - scaledTop)
     )
 
-    val output = Bitmap.createBitmap(diameter, diameter, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(output)
-    val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-
-    canvas.drawCircle(diameter / 2f, diameter / 2f, diameter / 2f, paint)
-    paint.xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
-    canvas.drawBitmap(squareBitmap, 0f, 0f, paint)
-
-    return output
+    return cropped
 }
 
 fun uploadCroppedImageWithName(
@@ -101,14 +83,16 @@ fun uploadCroppedImageWithName(
     uploadUrl: String,
     onResult: (Boolean, String?) -> Unit
 ) {
-    val client = OkHttpClient()
+    val client = OkHttpClient.Builder()
+        .connectTimeout(60, TimeUnit.SECONDS) // wait for connection
+        .readTimeout(120, TimeUnit.SECONDS)   // wait for server response
+        .writeTimeout(60, TimeUnit.SECONDS)   // wait for upload to finish
+        .build()
 
-    // Convert Bitmap to JPEG ByteArray
     val stream = ByteArrayOutputStream()
     bitmap.compress(Bitmap.CompressFormat.JPEG, 90, stream)
     val byteArray = stream.toByteArray()
 
-    // Build Multipart Body
     val requestBody = MultipartBody.Builder()
         .setType(MultipartBody.FORM)
         .addFormDataPart("name", name)
@@ -143,16 +127,18 @@ fun uploadCroppedImageWithName(
 fun uploadCroppedImageForMatching(
     bitmap: Bitmap,
     uploadUrl: String,
-    onResult: (Boolean, String?) -> Unit
+    onResult: (Boolean, MatchResponse?) -> Unit
 ) {
-    val client = OkHttpClient()
+    val client = OkHttpClient.Builder()
+        .connectTimeout(60, TimeUnit.SECONDS)
+        .readTimeout(120, TimeUnit.SECONDS)
+        .writeTimeout(60, TimeUnit.SECONDS)
+        .build()
 
-    // Convert Bitmap to JPEG byte array
     val stream = ByteArrayOutputStream()
     bitmap.compress(Bitmap.CompressFormat.JPEG, 90, stream)
     val byteArray = stream.toByteArray()
 
-    // Create multipart request body with only the file field
     val requestBody = MultipartBody.Builder()
         .setType(MultipartBody.FORM)
         .addFormDataPart(
@@ -162,24 +148,33 @@ fun uploadCroppedImageForMatching(
         )
         .build()
 
-    // Build the POST request
     val request = Request.Builder()
         .url(uploadUrl)
         .post(requestBody)
         .build()
 
-    // Execute asynchronously
     client.newCall(request).enqueue(object : Callback {
         override fun onFailure(call: Call, e: IOException) {
-            onResult(false, e.message)
+            onResult(false, null)
         }
 
         override fun onResponse(call: Call, response: Response) {
+
+            if (!response.isSuccessful) {
+                onResult(false, null)
+                return
+            }
+
             val body = response.body?.string()
-            if (response.isSuccessful) {
-                onResult(true, body)
+            if (body != null) {
+                try {
+                    val parsed = Gson().fromJson(body, MatchResponse::class.java)
+                    onResult(true, parsed)
+                } catch (_: Exception) {
+                    onResult(false, null)
+                }
             } else {
-                onResult(false, body ?: "HTTP ${response.code}")
+                onResult(false, null)
             }
         }
     })
@@ -191,20 +186,23 @@ fun CircularCropper(
     bitmap: Bitmap,
     onCropConfirmed: (Bitmap) -> Unit
 ) {
+
+    val squareSize = remember { mutableFloatStateOf(300f) }
+    var topLeft by remember { mutableStateOf(Offset.Zero) }
+    var canvasSize by remember { mutableStateOf(IntSize.Zero) }
+
     val imageWidth = bitmap.width
     val imageHeight = bitmap.height
-
-    val circleRadius = remember { mutableFloatStateOf(300f) }
-    var circleCenter by remember { mutableStateOf(Offset.Zero) }
-    var canvasSize by remember { mutableStateOf(IntSize.Zero) }
 
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
             .onGloballyPositioned {
                 canvasSize = it.size
-                if (circleCenter == Offset.Zero) {
-                    circleCenter = Offset(it.size.width / 2f, it.size.height / 2f)
+                if (topLeft == Offset.Zero) {
+                    val centerX = it.size.width / 2f - squareSize.floatValue / 2f
+                    val centerY = it.size.height / 2f - squareSize.floatValue / 2f
+                    topLeft = Offset(centerX, centerY)
                 }
             }
     ) {
@@ -217,13 +215,11 @@ fun CircularCropper(
         val imageOffset: Offset
 
         if (bitmapAspectRatio > containerAspectRatio) {
-            // Image fills width
             val width = containerWidth
             val height = (width / bitmapAspectRatio).toInt()
             displayedImageSize = IntSize(width, height)
             imageOffset = Offset(0f, ((containerHeight - height) / 2f))
         } else {
-            // Image fills height
             val height = containerHeight
             val width = (height * bitmapAspectRatio).toInt()
             displayedImageSize = IntSize(width, height)
@@ -248,41 +244,35 @@ fun CircularCropper(
             )
         }
 
-        // Transparent circle overlay with drag
         Canvas(
             modifier = Modifier
                 .fillMaxSize()
                 .pointerInput(Unit) {
                     detectDragGestures { change, dragAmount ->
                         change.consume()
-                        circleCenter += dragAmount
+                        topLeft += dragAmount
                     }
                 }
-                .graphicsLayer {
-                    compositingStrategy = CompositingStrategy.Offscreen
-                }
-                .drawWithContent {
-                    drawContent()
-                }
+                .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
         ) {
             drawRect(Color.Black.copy(alpha = 0.6f))
-            drawCircle(
+
+            drawRect(
                 color = Color.Transparent,
-                radius = circleRadius.floatValue,
-                center = circleCenter,
+                topLeft = topLeft,
+                size = Size(squareSize.floatValue, squareSize.floatValue),
                 blendMode = BlendMode.Clear
             )
         }
 
-        // Confirm button
         Button(
             onClick = {
                 val cropped = cropBitmapFromCircle(
                     original = bitmap,
                     displayedImageSize = displayedImageSize,
                     imageOffset = imageOffset,
-                    circleCenter = circleCenter,
-                    radius = circleRadius.floatValue
+                    squareTopLeft = topLeft,
+                    squareSize = squareSize.floatValue
                 )
                 onCropConfirmed(cropped)
             },

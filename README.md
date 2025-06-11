@@ -10,3 +10,10 @@ This project is a fingerprint recognition system built using classical computer 
 - [@Syed Mehdi Abidi](https://github.com/Mehdi-Abidi)
 - [@Faizan Ali](https://github.com/FaizanAli-io)
 
+## Structure
+
+<h1 align="center">
+<br>
+  <img src="Structure.jpeg" width="500" alt="Structure">
+<br>
+</h1>
